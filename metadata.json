@@ -1,0 +1,6 @@
+{
+  "name": "Prime Leads",
+  "description": "Weekly delivery of verified, skip-traced, off-market real estate leads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
