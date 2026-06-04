@@ -45,7 +45,6 @@ export const PLANS: Plan[] = [
       'Full enrichment + AI motivation score + custom outreach script per lead',
       'Personal hotlist (top 10 leads hand-picked weekly)',
       'SMS alert when a score-9 or score-10 lead drops',
-      'Monthly 30-min 1-on-1 strategy call',
       'Weekly Google Sheet delivery',
       'Dedicated support',
       'Loyalty perks at 3, 6, and 12 months'
