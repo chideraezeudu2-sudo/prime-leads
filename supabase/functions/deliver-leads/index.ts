@@ -68,7 +68,7 @@ serve(async (req) => {
 
 async function deliverToSubscriber(supabase: any, subscriber: any) {
   const plan = subscriber.plan;
-  const maxLeads = plan === "Elite" ? 50 : plan === "Pro" ? 100 : 500;
+  const maxLeads = plan === "Elite" ? 100 : plan === "Pro" ? 200 : 500;
   const isShared = plan === "Basic";
 
   // Get already delivered lead IDs
