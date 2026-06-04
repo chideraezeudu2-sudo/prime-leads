@@ -105,6 +105,10 @@ async function deliverToSubscriber(supabase: any, subscriber: any) {
     return { subscriber_id: subscriber.id, success: true, leads_delivered: 0 };
   }
 
+  // Skip trace leads based on plan
+  const leadIds = leads.map((l: any) => l.id);
+  await skipTraceLeads(leadIds, plan);
+
   // Sort by plan
   if (plan === "Elite") {
     leads.sort((a, b) => (b.motivation_score || 0) - (a.motivation_score || 0));
@@ -208,5 +212,38 @@ async function sendUrgencyAlert(phone: string, count: number) {
     );
   } catch (error) {
     console.error("SMS send error:", error);
+  }
+}
+
+async function skipTraceLeads(leadIds: string[], plan: string) {
+  if (!leadIds || leadIds.length === 0) return;
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/skip-trace-leads`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          lead_ids: leadIds,
+          plan: plan,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error("Skip trace failed:", await response.text());
+    } else {
+      const result = await response.json();
+      console.log(`Skip traced ${result.processed} leads: ${result.verified} verified, ${result.unverified} unverified`);
+    }
+  } catch (error) {
+    console.error("Skip trace error:", error);
   }
 }

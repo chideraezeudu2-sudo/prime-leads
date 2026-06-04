@@ -1,13 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// API keys (you'll need to set these in Supabase secrets)
 const TRACERFY_API_KEY = Deno.env.get("TRACERFY_API_KEY") || "";
-const DATAZAPP_API_KEY = Deno.env.get("DATAZAPP_API_KEY") || "";
+const BATCHSKIPTRACING_API_KEY = Deno.env.get("BATCHSKIPTRACING_API_KEY") || "";
 
 serve(async (req) => {
   try {
-    const { lead_ids } = await req.json();
+    const { lead_ids, plan } = await req.json();
 
     if (!lead_ids || !Array.isArray(lead_ids) || lead_ids.length === 0) {
       return new Response(
@@ -15,6 +14,9 @@ serve(async (req) => {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    // Default to Pro if plan not specified
+    const planType = plan || "Pro";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -30,7 +32,7 @@ serve(async (req) => {
       const batch = lead_ids.slice(i, i + batchSize);
       
       for (const leadId of batch) {
-        const result = await traceLead(supabase, leadId);
+        const result = await traceLead(supabase, leadId, planType);
         processed++;
         if (result.verified) verified++;
         else unverified++;
@@ -55,7 +57,7 @@ serve(async (req) => {
   }
 });
 
-async function traceLead(supabase: any, leadId: string) {
+async function traceLead(supabase: any, leadId: string, plan: string) {
   // Fetch lead from Supabase
   const { data: lead, error } = await supabase
     .from("raw_leads")
@@ -71,15 +73,41 @@ async function traceLead(supabase: any, leadId: string) {
   const ownerName = lead.owner_name || "";
   const mailingAddress = lead.mailing_address || lead.property_address || "";
 
-  // Try Tracerfy first
-  let phoneResult = await tryTracerfy(ownerName, mailingAddress);
-  
-  // If Tracerfy fails or low confidence, try Datazapp
-  if (!phoneResult.verified || phoneResult.confidence < 0.7) {
-    const datazappResult = await tryDatazapp(ownerName, mailingAddress);
-    if (datazappResult.verified) {
-      phoneResult = datazappResult;
+  let phoneResult: any;
+
+  if (plan === "Basic") {
+    // Basic: Tracerfy only, no fallback
+    phoneResult = await tryTracerfy(ownerName, mailingAddress);
+    phoneResult.provider = phoneResult.verified ? "tracerfy" : "unverified";
+  } else if (plan === "Pro") {
+    // Pro: Tracerfy first, fallback to BatchSkipTracing if confidence < 0.7 or no results
+    phoneResult = await tryTracerfy(ownerName, mailingAddress);
+    
+    if (!phoneResult.verified || phoneResult.confidence < 0.7) {
+      const batchResult = await tryBatchSkipTracing(ownerName, mailingAddress);
+      if (batchResult.verified) {
+        phoneResult = batchResult;
+      } else {
+        // Keep Tracerfy result even if low confidence for Pro
+        phoneResult.provider = "tracerfy";
+      }
+    } else {
+      phoneResult.provider = "tracerfy";
     }
+  } else if (plan === "Elite") {
+    // Elite: BatchSkipTracing only, skip Tracerfy entirely
+    phoneResult = await tryBatchSkipTracing(ownerName, mailingAddress);
+    phoneResult.provider = "batchskiptracing";
+  } else {
+    // Default to Pro behavior
+    phoneResult = await tryTracerfy(ownerName, mailingAddress);
+    if (!phoneResult.verified || phoneResult.confidence < 0.7) {
+      const batchResult = await tryBatchSkipTracing(ownerName, mailingAddress);
+      if (batchResult.verified) {
+        phoneResult = batchResult;
+      }
+    }
+    phoneResult.provider = phoneResult.verified ? "tracerfy" : "unverified";
   }
 
   // Update lead with phone info
@@ -98,57 +126,64 @@ async function traceLead(supabase: any, leadId: string) {
 
 async function tryTracerfy(ownerName: string, mailingAddress: string) {
   if (!TRACERFY_API_KEY) {
-    return { verified: false, provider: "unverified", confidence: 0 };
+    console.log("Tracerfy API key not configured");
+    return { verified: false, provider: "tracerfy", confidence: 0, phone_primary: null, phone_secondary: null };
   }
 
   try {
-    // Note: Replace with actual Tracerfy API endpoint
-    const response = await fetch("https://api.tracerfy.com/v1/phone-lookup", {
+    // Tracerfy API - uses token in Authorization header
+    const response = await fetch("https://api.tracerfy.com/api/v1/phone", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${TRACERFY_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        name: ownerName,
+        full_name: ownerName,
         address: mailingAddress,
       }),
     });
 
     if (!response.ok) {
-      return { verified: false, provider: "tracerfy", confidence: 0 };
+      console.error(`Tracerfy API error: ${response.status}`);
+      return { verified: false, provider: "tracerfy", confidence: 0, phone_primary: null, phone_secondary: null };
     }
 
     const data = await response.json();
     
-    if (data.phones && data.phones.length > 0) {
+    // Tracerfy returns phone numbers in results array
+    if (data.results && data.results.length > 0) {
+      const primary = data.results.find((r: any) => r.type === "mobile") || data.results[0];
+      const secondary = data.results.find((r: any, idx: number) => idx > 0);
+      
       return {
         verified: true,
         provider: "tracerfy",
-        phone_primary: data.phones[0].number,
-        phone_secondary: data.phones[1]?.number || null,
-        confidence: data.phones[0].confidence || 0.8,
+        phone_primary: primary?.phone_number || primary?.phone || null,
+        phone_secondary: secondary?.phone_number || secondary?.phone || null,
+        confidence: primary?.confidence || primary?.score || 0.8,
       };
     }
 
-    return { verified: false, provider: "tracerfy", confidence: 0 };
+    return { verified: false, provider: "tracerfy", confidence: 0, phone_primary: null, phone_secondary: null };
   } catch (error) {
     console.error("Tracerfy error:", error);
-    return { verified: false, provider: "tracerfy", confidence: 0 };
+    return { verified: false, provider: "tracerfy", confidence: 0, phone_primary: null, phone_secondary: null };
   }
 }
 
-async function tryDatazapp(ownerName: string, mailingAddress: string) {
-  if (!DATAZAPP_API_KEY) {
-    return { verified: false, provider: "datazapp", confidence: 0 };
+async function tryBatchSkipTracing(ownerName: string, mailingAddress: string) {
+  if (!BATCHSKIPTRACING_API_KEY) {
+    console.log("BatchSkipTracing API key not configured");
+    return { verified: false, provider: "batchskiptracing", confidence: 0, phone_primary: null, phone_secondary: null };
   }
 
   try {
-    // Note: Replace with actual Datazapp API endpoint
-    const response = await fetch("https://api.datazapp.com/v2/lookup", {
+    // BatchSkipTracing API
+    const response = await fetch("https://api.batchskiptracing.com/v1/lookup", {
       method: "POST",
       headers: {
-        "Authorization": `Token ${DATAZAPP_API_KEY}`,
+        "Authorization": `Bearer ${BATCHSKIPTRACING_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -158,24 +193,26 @@ async function tryDatazapp(ownerName: string, mailingAddress: string) {
     });
 
     if (!response.ok) {
-      return { verified: false, provider: "datazapp", confidence: 0 };
+      console.error(`BatchSkipTracing API error: ${response.status}`);
+      return { verified: false, provider: "batchskiptracing", confidence: 0, phone_primary: null, phone_secondary: null };
     }
 
     const data = await response.json();
     
-    if (data.phone_numbers && data.phone_numbers.length > 0) {
+    // Parse BatchSkipTracing response
+    if (data.phones && data.phones.length > 0) {
       return {
         verified: true,
-        provider: "datazapp",
-        phone_primary: data.phone_numbers[0],
-        phone_secondary: data.phone_numbers[1] || null,
-        confidence: data.confidence || 0.7,
+        provider: "batchskiptracing",
+        phone_primary: data.phones[0]?.number || data.phones[0]?.phone || null,
+        phone_secondary: data.phones[1]?.number || data.phones[1]?.phone || null,
+        confidence: data.phones[0]?.confidence || data.confidence || 0.8,
       };
     }
 
-    return { verified: false, provider: "datazapp", confidence: 0 };
+    return { verified: false, provider: "batchskiptracing", confidence: 0, phone_primary: null, phone_secondary: null };
   } catch (error) {
-    console.error("Datazapp error:", error);
-    return { verified: false, provider: "datazapp", confidence: 0 };
+    console.error("BatchSkipTracing error:", error);
+    return { verified: false, provider: "batchskiptracing", confidence: 0, phone_primary: null, phone_secondary: null };
   }
 }
