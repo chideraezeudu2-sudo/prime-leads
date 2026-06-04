@@ -20,10 +20,10 @@ export const PLANS: Plan[] = [
     id: 'Pro',
     name: 'Pro',
     price: '$150',
-    volume: '100 leads/month',
+    volume: '200 exclusive leads/month',
     isPopular: true,
     features: [
-      '100 leads/month',
+      '200 exclusive leads/month',
       'All standard + advanced lead types',
       'Up to 3 states + 5 zip codes',
       'Skip-traced + enriched (ARV, equity %, max offer)',
@@ -37,14 +37,15 @@ export const PLANS: Plan[] = [
     id: 'Elite',
     name: 'Elite',
     price: '$500',
-    volume: '50 leads/month',
+    volume: '100 exclusive leads/month',
     features: [
-      '50 leads/month',
+      '100 exclusive leads/month',
       'All lead types including niche',
       'Unlimited geography',
       'Full enrichment + AI motivation score + custom outreach script per lead',
       'Personal hotlist (top 10 leads hand-picked weekly)',
       'SMS alert when a score-9 or score-10 lead drops',
+      'Monthly 30-min 1-on-1 strategy call',
       'Weekly Google Sheet delivery',
       'Dedicated support',
       'Loyalty perks at 3, 6, and 12 months'
@@ -147,7 +148,7 @@ export const FAQS: FAQItem[] = [
   },
   {
     question: 'What\'s the difference between Basic and Pro lead volume?',
-    answer: "Basic gives you 500 mixed leads because they're broader and less filtered. Pro gives you 100 leads that are more targeted, enriched with property financials, and matched to your specific geography. Fewer leads, higher quality."
+    answer: "Basic gives you 500 shared leads because they're broader and less filtered. Pro gives you 200 exclusive leads that are more targeted, enriched with property financials, and matched to your specific geography. Fewer leads, higher quality."
   },
   {
     question: 'When do I get my first delivery?',
